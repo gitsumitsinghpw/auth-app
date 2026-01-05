@@ -40,7 +40,7 @@ export default function Register() {
       if (data.success) {
         setSuccess(true);
         setTimeout(() => {
-          router.push('/login?message=Registration successful. Please sign in.');
+          router.push('/dashboard');
         }, 2000);
       } else {
         if (data.errors) {
@@ -64,13 +64,13 @@ export default function Register() {
             <div className="text-green-600 text-6xl mb-4">✓</div>
             <h2 className="text-2xl font-bold text-gray-900 mb-4">Registration Successful!</h2>
             <p className="text-gray-600 mb-6">
-              Your account has been created successfully. You will be redirected to the login page shortly.
+              Your account has been created successfully. You will be redirected to your dashboard shortly.
             </p>
             <Link
-              href="/login"
+              href="/dashboard"
               className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors duration-200 font-medium"
             >
-              Go to Login
+              Go to Dashboard
             </Link>
           </div>
         </div>

@@ -100,6 +100,7 @@ export async function POST(request: NextRequest) {
 
     // Create response
     const response = NextResponse.json({
+      success: true,
       message: 'Login successful',
       user: {
         id: user.id,

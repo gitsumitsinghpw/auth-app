@@ -3,15 +3,13 @@ import { clearSession } from '@/lib/session';
 
 export async function POST(request: NextRequest) {
   try {
-    const response = NextResponse.json({
-      success: true,
-      message: 'Logged out successfully'
-    });
+    // Create redirect response to login page
+    const response = NextResponse.redirect(new URL('/login', request.url));
 
     // Clear the session
     await clearSession(request, response);
 
-    // Add security headers
+    // Add security headers to clear browser data
     response.headers.set('Clear-Site-Data', '"cache", "cookies", "storage"');
     
     return response;
@@ -19,17 +17,12 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Logout error:', error);
     
-    return NextResponse.json(
-      { 
-        success: false, 
-        message: 'An error occurred during logout' 
-      },
-      { status: 500 }
-    );
+    // On error, still redirect to login but log the error
+    return NextResponse.redirect(new URL('/login', request.url));
   }
 }
 
 export async function GET(request: NextRequest) {
-  // Allow GET method for logout links
+  // Allow GET method for logout links - redirect to login page
   return POST(request);
 }

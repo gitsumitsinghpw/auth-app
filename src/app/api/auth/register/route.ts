@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getIronSession } from 'iron-session';
+import { sessionOptions } from '@/lib/session';
+import { SessionData } from '@/lib/auth';
 import { dbConnect } from '@/lib/mongodb';
 import { User } from '@/models/User';
 import { validateInput, registrationSchema } from '@/lib/validation';
 import { checkRegisterRateLimit, updateRateLimit, rateLimitConfigs } from '@/lib/rateLimit';
-import { generateCSRFToken } from '@/lib/auth';
 import bcrypt from 'bcryptjs';
 import { fallbackStorage } from '@/lib/fallbackStorage';
 
@@ -94,23 +96,33 @@ export async function POST(request: NextRequest) {
           emailVerified: false
         });
 
-        const csrfToken = generateCSRFToken();
         updateRateLimit(request, true, rateLimitConfigs.register);
 
-        return NextResponse.json(
-          { 
-            success: true, 
-            message: 'Account created successfully',
-            user: {
-              id: newUser._id.toString(),
-              name: newUser.name,
-              email: newUser.email,
-              role: newUser.role
-            },
-            csrfToken
-          },
-          { status: 201 }
-        );
+        // Create JSON response 
+        const response = NextResponse.json({
+          success: true,
+          message: 'Account created successfully',
+          user: {
+            id: newUser._id.toString(),
+            name: newUser.name,
+            email: newUser.email,
+            role: newUser.role
+          }
+        }, { status: 201 });
+        
+        // Create session for the newly registered user
+        const session = await getIronSession<SessionData>(request, response, sessionOptions);
+        session.isLoggedIn = true;
+        session.user = {
+          id: newUser._id.toString(),
+          email: newUser.email,
+          name: newUser.name,
+          role: newUser.role as 'user' | 'admin',
+          authMethod: 'local'
+        };
+        await session.save();
+        
+        return response;
       } catch (dbError) {
         console.error('MongoDB operation failed, falling back to in-memory storage:', dbError);
         useDatabase = false;
@@ -146,24 +158,34 @@ export async function POST(request: NextRequest) {
 
       fallbackStorage.addUser(newUser);
 
-      const csrfToken = generateCSRFToken();
       updateRateLimit(request, true, rateLimitConfigs.register);
 
-      return NextResponse.json(
-        { 
-          success: true, 
-          message: 'Account created successfully (using fallback storage)',
-          user: {
-            id: newUser.id,
-            name: newUser.name,
-            email: newUser.email,
-            role: newUser.role
-          },
-          csrfToken,
-          note: 'Data stored in memory - will be lost on server restart'
+      // Create JSON response 
+      const response = NextResponse.json({
+        success: true,
+        message: 'Account created successfully (using fallback storage)',
+        user: {
+          id: newUser.id,
+          name: newUser.name,
+          email: newUser.email,
+          role: newUser.role
         },
-        { status: 201 }
-      );
+        note: 'Data stored in memory - will be lost on server restart'
+      }, { status: 201 });
+      
+      // Create session for the newly registered user
+      const session = await getIronSession<SessionData>(request, response, sessionOptions);
+      session.isLoggedIn = true;
+      session.user = {
+        id: newUser.id,
+        email: newUser.email,
+        name: newUser.name,
+        role: newUser.role as 'user' | 'admin',
+        authMethod: 'local'
+      };
+      await session.save();
+      
+      return response;
     }
 
   } catch (error) {
