@@ -1,16 +1,102 @@
-import { getSession } from '@/lib/session';
-import { redirect } from 'next/navigation';
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
-export default async function AdminDashboard() {
-  const session = await getSession();
+interface AdminStats {
+  totalUsers: number;
+  activeUsers: number;
+  adminUsers: number;
+  lockedUsers: number;
+  verifiedUsers: number;
+  recentUsers: number;
+  authMethods: {
+    local: number;
+    oauth: number;
+    ldapNote: string;
+  };
+}
 
-  if (!session.isLoggedIn) {
-    redirect('/login');
+interface UserSession {
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    role: 'user' | 'admin';
+    authMethod: 'local' | 'ldap' | 'oauth';
+  };
+}
+
+export default function AdminDashboard() {
+  const router = useRouter();
+  const [stats, setStats] = useState<AdminStats | null>(null);
+  const [user, setUser] = useState<UserSession['user'] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        // Check authentication and get user info
+        const profileResponse = await fetch('/api/user/profile');
+        if (!profileResponse.ok) {
+          if (profileResponse.status === 401) {
+            router.push('/login');
+            return;
+          }
+          throw new Error('Failed to load profile');
+        }
+        
+        const profileData = await profileResponse.json();
+        if (profileData.user.role !== 'admin') {
+          router.push('/dashboard');
+          return;
+        }
+        
+        setUser(profileData.user);
+        
+        // Fetch admin statistics
+        const statsResponse = await fetch('/api/admin/stats');
+        if (!statsResponse.ok) {
+          throw new Error('Failed to load statistics');
+        }
+        
+        const statsData = await statsResponse.json();
+        setStats(statsData.statistics);
+        
+      } catch (error) {
+        console.error('Error loading admin data:', error);
+        setError('Failed to load admin dashboard data');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, [router]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-red-600"></div>
+      </div>
+    );
   }
 
-  if (!session.user || session.user.role !== 'admin') {
-    redirect('/dashboard');
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-gray-900">Error</h2>
+          <p className="text-gray-600 mt-2">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return null; // This shouldn't happen, but just in case
   }
 
   return (
@@ -63,7 +149,7 @@ export default async function AdminDashboard() {
             </div>
             <div className="ml-4">
               <h2 className="text-2xl font-bold text-gray-900">
-                Admin Panel - Welcome, {session.user.name}!
+                Admin Panel - Welcome, {user.name}!
               </h2>
               <p className="text-gray-600">
                 You have full administrative access to manage users and system settings.
@@ -83,7 +169,9 @@ export default async function AdminDashboard() {
               </div>
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">Total Users</p>
-                <p className="text-2xl font-bold text-gray-900">Loading...</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {stats ? stats.totalUsers.toLocaleString() : 'Loading...'}
+                </p>
               </div>
             </div>
           </div>
@@ -97,7 +185,9 @@ export default async function AdminDashboard() {
               </div>
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">Active Users</p>
-                <p className="text-2xl font-bold text-gray-900">Loading...</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {stats ? stats.activeUsers.toLocaleString() : 'Loading...'}
+                </p>
               </div>
             </div>
           </div>
@@ -111,7 +201,9 @@ export default async function AdminDashboard() {
               </div>
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">Admin Users</p>
-                <p className="text-2xl font-bold text-gray-900">Loading...</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {stats ? stats.adminUsers.toLocaleString() : 'Loading...'}
+                </p>
               </div>
             </div>
           </div>
@@ -125,8 +217,28 @@ export default async function AdminDashboard() {
               </div>
               <div className="ml-4">
                 <p className="text-sm font-medium text-gray-600">Locked Accounts</p>
-                <p className="text-2xl font-bold text-gray-900">Loading...</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {stats ? stats.lockedUsers.toLocaleString() : 'Loading...'}
+                </p>
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Statistics Note */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-8">
+          <div className="flex items-start">
+            <div className="w-5 h-5 text-blue-600 mt-0.5">
+              <svg fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div className="ml-3">
+              <p className="text-sm text-blue-800">
+                <strong>Note:</strong> Statistics shown above reflect users stored in the MongoDB database only. 
+                LDAP users exist only during active sessions and are not included in these counts. 
+                The system supports both local MongoDB users and LDAP directory users for authentication.
+              </p>
             </div>
           </div>
         </div>
