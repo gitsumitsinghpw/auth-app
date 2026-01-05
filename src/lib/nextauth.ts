@@ -1,4 +1,4 @@
-import { NextAuthOptions } from 'next-auth';
+import type { NextAuthOptions } from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
 import GitHubProvider from 'next-auth/providers/github';
 import { dbConnect } from '@/lib/mongodb';
@@ -97,11 +97,19 @@ export const authOptions: NextAuthOptions = {
     },
 
     async redirect({ url, baseUrl }) {
+      // Handle OAuth callback redirects
+      if (url.startsWith("/auth/callback")) {
+        return url;
+      }
+      
       // Allows relative callback URLs
       if (url.startsWith("/")) return `${baseUrl}${url}`;
+      
       // Allows callback URLs on the same origin
       else if (new URL(url).origin === baseUrl) return url;
-      return baseUrl;
+      
+      // Default fallback
+      return `${baseUrl}/dashboard`;
     }
   },
 

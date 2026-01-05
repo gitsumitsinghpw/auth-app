@@ -79,11 +79,20 @@ export default function Login() {
 
   const handleOAuthSignIn = async (provider: 'google' | 'github') => {
     try {
-      const result = await signIn(provider, { callbackUrl: '/' });
+      // Get redirect URL from query params or default to dashboard
+      const urlParams = new URLSearchParams(window.location.search);
+      const redirectTo = urlParams.get('redirectTo') || '/dashboard';
+      
+      const result = await signIn(provider, { 
+        callbackUrl: redirectTo,
+        redirect: true
+      });
+      
       if (result?.error) {
         setError('OAuth authentication failed');
       }
-    } catch {
+    } catch (error) {
+      console.error('OAuth error:', error);
       setError('OAuth authentication failed');
     }
   };
