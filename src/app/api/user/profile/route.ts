@@ -34,6 +34,26 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Handle LDAP users differently since they don't exist in MongoDB
+    if (session.user.authMethod === 'ldap') {
+      return NextResponse.json({
+        success: true,
+        user: {
+          id: session.user.id,
+          name: session.user.name,
+          email: session.user.email,
+          role: session.user.role,
+          authMethod: session.user.authMethod,
+          avatar: null, // LDAP users don't have avatars stored
+          emailVerified: true, // LDAP users are considered verified
+          lastLogin: new Date().toISOString(), // Current login
+          createdAt: new Date().toISOString(), // LDAP users don't have creation date
+          isLdapUser: true
+        }
+      });
+    }
+
+    // Handle local users from MongoDB
     await dbConnect();
     
     const user = await User.findById(session.user.id).select('-password');
@@ -56,7 +76,8 @@ export async function GET(request: NextRequest) {
         avatar: user.avatar,
         emailVerified: user.emailVerified,
         lastLogin: user.lastLogin,
-        createdAt: user.createdAt
+        createdAt: user.createdAt,
+        isLdapUser: false
       }
     });
 
@@ -96,6 +117,17 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json(
         { success: false, message: 'Unauthorized' },
         { status: 401 }
+      );
+    }
+
+    // LDAP users cannot update their profile through the app
+    if (session.user.authMethod === 'ldap') {
+      return NextResponse.json(
+        { 
+          success: false, 
+          message: 'LDAP users cannot update profile information. Please contact your system administrator.' 
+        },
+        { status: 403 }
       );
     }
 

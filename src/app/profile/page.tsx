@@ -5,15 +5,19 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 
 interface UserProfile {
-  _id: string;
+  _id?: string;
+  id: string;
   name: string;
   email: string;
   role: 'user' | 'admin';
   authMethod: 'local' | 'ldap' | 'oauth';
-  isActive: boolean;
+  isActive?: boolean;
   createdAt: string;
-  lastLoginAt: string | null;
-  loginAttempts: number;
+  lastLoginAt?: string | null;
+  lastLogin?: string | null;
+  loginAttempts?: number;
+  emailVerified?: boolean;
+  isLdapUser?: boolean;
 }
 
 export default function ProfilePage() {
@@ -204,7 +208,7 @@ export default function ProfilePage() {
             <div className="bg-white rounded-lg shadow p-6">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold text-gray-900">Profile Information</h2>
-                {!isEditing && (
+                {!isEditing && !user.isLdapUser && (
                   <button
                     onClick={() => setIsEditing(true)}
                     className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
@@ -212,9 +216,23 @@ export default function ProfilePage() {
                     Edit Profile
                   </button>
                 )}
+                {user.isLdapUser && (
+                  <div className="text-sm text-gray-500">
+                    LDAP users cannot edit profile information
+                  </div>
+                )}
               </div>
 
-              {isEditing ? (
+              {user.isLdapUser && (
+                <div className="mb-4 bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-lg">
+                  <p className="text-sm">
+                    <strong>Note:</strong> Your profile information is managed by your organization's LDAP directory. 
+                    To update your information, please contact your system administrator.
+                  </p>
+                </div>
+              )}
+
+              {isEditing && !user.isLdapUser ? (
                 <form onSubmit={handleUpdateProfile} className="space-y-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -399,7 +417,7 @@ export default function ProfilePage() {
                   </p>
                 </div>
 
-                {user.loginAttempts > 0 && (
+                {(user.loginAttempts ?? 0) > 0 && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Failed Login Attempts</label>
                     <p className="text-sm text-red-600 font-medium">{user.loginAttempts}</p>
