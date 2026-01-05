@@ -97,6 +97,13 @@ export const ldapLoginSchema = Joi.object({
       'string.min': 'Password is required',
       'string.max': 'Password cannot exceed 128 characters',
       'any.required': 'Password is required'
+    }),
+
+  authMethod: Joi.string()
+    .valid('ldap')
+    .required()
+    .messages({
+      'any.only': 'Invalid authentication method for LDAP'
     })
 });
 

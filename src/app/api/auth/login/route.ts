@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getIronSession } from 'iron-session';
 import { sessionOptions } from '@/lib/session';
 import { SessionData } from '@/lib/auth';
-import { loginSchema } from '@/lib/validation';
+import { loginSchema, ldapLoginSchema } from '@/lib/validation';
 import { authenticateLDAP } from '@/lib/ldap';
 import { dbConnect } from '@/lib/mongodb';
 import { User } from '@/models/User';
@@ -11,32 +11,57 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     
-    // Validate input
-    const { error, value } = loginSchema.validate(body);
-    if (error) {
-      return NextResponse.json(
-        { 
-          message: 'Validation error',
-          errors: error.details.map(detail => ({
-            field: detail.path.join('.'),
-            message: detail.message
-          }))
-        },
-        { status: 400 }
-      );
+    // Determine auth method and validate accordingly
+    const authMethod = body.authMethod || 'local';
+    let validationResult;
+    let credentials: { email?: string; username?: string; password: string };
+
+    if (authMethod === 'ldap') {
+      // Validate LDAP credentials
+      validationResult = ldapLoginSchema.validate(body);
+      if (validationResult.error) {
+        return NextResponse.json(
+          { 
+            success: false,
+            message: 'Validation error',
+            errors: validationResult.error.details.map(detail => ({
+              field: detail.path.join('.'),
+              message: detail.message
+            }))
+          },
+          { status: 400 }
+        );
+      }
+      credentials = { username: validationResult.value.username, password: validationResult.value.password };
+    } else {
+      // Validate local credentials
+      validationResult = loginSchema.validate(body);
+      if (validationResult.error) {
+        return NextResponse.json(
+          { 
+            success: false,
+            message: 'Validation error',
+            errors: validationResult.error.details.map(detail => ({
+              field: detail.path.join('.'),
+              message: detail.message
+            }))
+          },
+          { status: 400 }
+        );
+      }
+      credentials = { email: validationResult.value.email, password: validationResult.value.password };
     }
 
-    const { email, password, authMethod = 'local' } = value;
     let user = null;
 
     if (authMethod === 'ldap') {
       // LDAP Authentication
       try {
-        const ldapUser = await authenticateLDAP(email, password);
+        const ldapUser = await authenticateLDAP(credentials.username!, credentials.password);
         if (ldapUser && ldapUser.success) {
           user = {
             id: ldapUser.user?.uid || crypto.randomUUID(),
-            email: ldapUser.user?.email || email,
+            email: ldapUser.user?.email || credentials.username,
             name: ldapUser.user?.name || 'LDAP User',
             role: (ldapUser.user?.role || 'user') as 'user' | 'admin',
             isActive: true,
@@ -54,12 +79,12 @@ export async function POST(request: NextRequest) {
       try {
         await dbConnect();
         const mongoUser = await User.findOne({ 
-          email: email.toLowerCase(), 
+          email: credentials.email?.toLowerCase(), 
           isActive: true,
           authMethod: 'local' 
         });
         
-        if (mongoUser && await mongoUser.comparePassword(password)) {
+        if (mongoUser && await mongoUser.comparePassword(credentials.password)) {
           user = {
             id: mongoUser._id.toString(),
             email: mongoUser.email,
@@ -86,14 +111,14 @@ export async function POST(request: NextRequest) {
 
     if (!user) {
       return NextResponse.json(
-        { message: 'Invalid credentials' },
+        { success: false, message: 'Invalid credentials' },
         { status: 401 }
       );
     }
 
     if (!user.isVerified) {
       return NextResponse.json(
-        { message: 'Please verify your email before logging in' },
+        { success: false, message: 'Please verify your email before logging in' },
         { status: 403 }
       );
     }
@@ -127,7 +152,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Login error:', error);
     return NextResponse.json(
-      { message: 'Internal server error' },
+      { success: false, message: 'Internal server error' },
       { status: 500 }
     );
   }
