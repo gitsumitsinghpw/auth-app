@@ -26,27 +26,27 @@ interface RateLimitResult {
 // Default configurations for different endpoints
 export const rateLimitConfigs = {
   login: {
-    maxAttempts: 10,
+    maxAttempts: process.env.NODE_ENV === 'development' ? 1000 : 10,
     windowMs: 15 * 60 * 1000, // 15 minutes
     skipSuccessfulRequests: true
   },
   register: {
-    maxAttempts: 10,
+    maxAttempts: process.env.NODE_ENV === 'development' ? 1000 : 10,
     windowMs: 15 * 60 * 1000, // 15 minutes (more lenient for development)
     skipSuccessfulRequests: true
   },
   passwordReset: {
-    maxAttempts: 5,
+    maxAttempts: process.env.NODE_ENV === 'development' ? 1000 : 5,
     windowMs: 30 * 60 * 1000, // 30 minutes
     skipSuccessfulRequests: true
   },
   api: {
-    maxAttempts: 100,
+    maxAttempts: process.env.NODE_ENV === 'development' ? 10000 : 100,
     windowMs: 15 * 60 * 1000, // 15 minutes
     skipSuccessfulRequests: false
   },
   default: {
-    maxAttempts: 20,
+    maxAttempts: process.env.NODE_ENV === 'development' ? 10000 : 20,
     windowMs: 15 * 60 * 1000, // 15 minutes
     skipSuccessfulRequests: false
   }

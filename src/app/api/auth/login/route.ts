@@ -1,222 +1,132 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getIronSession } from 'iron-session';
+import { sessionOptions } from '@/lib/session';
+import { SessionData } from '@/lib/auth';
+import { loginSchema } from '@/lib/validation';
+import { authenticateLDAP } from '@/lib/ldap';
 import { dbConnect } from '@/lib/mongodb';
 import { User } from '@/models/User';
-import { validateInput, loginSchema, ldapLoginSchema } from '@/lib/validation';
-import { checkLoginRateLimit, updateRateLimit, rateLimitConfigs } from '@/lib/rateLimit';
-import { generateCSRFToken, userToSessionUser } from '@/lib/auth';
-import { updateSession } from '@/lib/session';
-import { authenticateLDAP } from '@/lib/ldap';
 
 export async function POST(request: NextRequest) {
-  const response = NextResponse.next();
-  
   try {
-    // Check rate limiting
-    const rateLimitResult = checkLoginRateLimit(request);
-    
-    if (!rateLimitResult.allowed) {
-      return NextResponse.json(
-        { 
-          success: false, 
-          message: 'Too many login attempts. Please try again later.',
-          retryAfter: Math.ceil((rateLimitResult.resetTime - Date.now()) / 1000)
-        },
-        { 
-          status: 429,
-          headers: {
-            'Retry-After': Math.ceil((rateLimitResult.resetTime - Date.now()) / 1000).toString()
-          }
-        }
-      );
-    }
-
     const body = await request.json();
-    const authMethod = body.authMethod || 'local';
-
-    // Handle LDAP authentication
-    if (authMethod === 'ldap') {
-      const validation = validateInput(ldapLoginSchema, body);
-      
-      if (!validation.isValid) {
-        updateRateLimit(request, false, rateLimitConfigs.login);
-        return NextResponse.json(
-          { 
-            success: false, 
-            message: 'Validation failed',
-            errors: validation.errors 
-          },
-          { status: 400 }
-        );
-      }
-
-      const { username, password } = validation.data!;
-
-      // Authenticate via LDAP
-      const ldapResult = await authenticateLDAP(username, password);
-      
-      if (!ldapResult.success) {
-        updateRateLimit(request, false, rateLimitConfigs.login);
-        return NextResponse.json(
-          { 
-            success: false, 
-            message: ldapResult.error || 'LDAP authentication failed' 
-          },
-          { status: 401 }
-        );
-      }
-
-      await dbConnect();
-
-      // Check if user exists in our database or create them
-      let user = await User.findOne({ email: ldapResult.user!.email });
-      
-      if (!user) {
-        // Create new LDAP user in our database
-        user = await User.create({
-          name: ldapResult.user!.name,
-          email: ldapResult.user!.email,
-          role: ldapResult.user!.role,
-          authMethod: 'ldap',
-          provider: 'ldap',
-          providerId: ldapResult.user!.uid,
-          isActive: true,
-          emailVerified: true,
-          lastLogin: new Date()
-        });
-      } else {
-        // Update existing user
-        user.lastLogin = new Date();
-        user.loginAttempts = 0;
-        user.lockUntil = undefined;
-        await user.save();
-      }
-
-      // Update session
-      const sessionUser = userToSessionUser(user);
-      await updateSession(request, response, {
-        user: sessionUser,
-        isLoggedIn: true,
-        loginAttempts: 0
-      });
-
-      updateRateLimit(request, true, rateLimitConfigs.login);
-
-      return NextResponse.json({
-        success: true,
-        message: 'Login successful',
-        user: sessionUser,
-        csrfToken: generateCSRFToken()
-      });
-    }
-
-    // Handle local authentication
-    const validation = validateInput(loginSchema, body);
     
-    if (!validation.isValid) {
-      updateRateLimit(request, false, rateLimitConfigs.login);
+    // Validate input
+    const { error, value } = loginSchema.validate(body);
+    if (error) {
       return NextResponse.json(
         { 
-          success: false, 
-          message: 'Validation failed',
-          errors: validation.errors 
+          message: 'Validation error',
+          errors: error.details.map(detail => ({
+            field: detail.path.join('.'),
+            message: detail.message
+          }))
         },
         { status: 400 }
       );
     }
 
-    const { email, password } = validation.data!;
+    const { email, password, authMethod = 'local' } = value;
+    let user = null;
 
-    await dbConnect();
+    if (authMethod === 'ldap') {
+      // LDAP Authentication
+      try {
+        const ldapUser = await authenticateLDAP(email, password);
+        if (ldapUser && ldapUser.success) {
+          user = {
+            id: ldapUser.user?.uid || crypto.randomUUID(),
+            email: ldapUser.user?.email || email,
+            name: ldapUser.user?.name || 'LDAP User',
+            role: (ldapUser.user?.role || 'user') as 'user' | 'admin',
+            isActive: true,
+            isVerified: true,
+            authMethod: 'ldap' as const
+          };
+        }
+      } catch (ldapError) {
+        console.error('LDAP authentication error:', ldapError);
+      }
+    }
 
-    // Find user by email
-    const user = await User.findOne({ 
-      email: email.toLowerCase(),
-      authMethod: 'local'
-    });
+    // Local authentication - MongoDB only
+    if (!user) {
+      try {
+        await dbConnect();
+        const mongoUser = await User.findOne({ 
+          email: email.toLowerCase(), 
+          isActive: true,
+          authMethod: 'local' 
+        });
+        
+        if (mongoUser && await mongoUser.comparePassword(password)) {
+          user = {
+            id: mongoUser._id.toString(),
+            email: mongoUser.email,
+            name: mongoUser.name,
+            role: mongoUser.role as 'user' | 'admin',
+            isActive: mongoUser.isActive,
+            isVerified: mongoUser.emailVerified,
+            authMethod: 'local' as const
+          };
+          
+          // Update last login
+          mongoUser.lastLogin = new Date();
+          mongoUser.resetLoginAttempts();
+          await mongoUser.save();
+        } else if (mongoUser) {
+          // User found but password incorrect - increment login attempts
+          mongoUser.incLoginAttempts();
+          await mongoUser.save();
+        }
+      } catch (mongoError) {
+        console.error('MongoDB authentication error:', mongoError);
+      }
+    }
 
     if (!user) {
-      updateRateLimit(request, false, rateLimitConfigs.login);
       return NextResponse.json(
-        { 
-          success: false, 
-          message: 'Invalid email or password' 
-        },
+        { message: 'Invalid credentials' },
         { status: 401 }
       );
     }
 
-    // Check if account is locked
-    if (user.isLocked) {
-      updateRateLimit(request, false, rateLimitConfigs.login);
-      const lockTimeRemaining = Math.ceil((user.lockUntil!.getTime() - Date.now()) / 1000 / 60);
+    if (!user.isVerified) {
       return NextResponse.json(
-        { 
-          success: false, 
-          message: `Account is temporarily locked. Try again in ${lockTimeRemaining} minutes.` 
-        },
-        { status: 423 }
-      );
-    }
-
-    // Check if account is active
-    if (!user.isActive) {
-      updateRateLimit(request, false, rateLimitConfigs.login);
-      return NextResponse.json(
-        { 
-          success: false, 
-          message: 'Account is deactivated. Please contact support.' 
-        },
+        { message: 'Please verify your email before logging in' },
         { status: 403 }
       );
     }
 
-    // Verify password
-    const isPasswordValid = await user.comparePassword(password);
-    
-    if (!isPasswordValid) {
-      await user.incLoginAttempts();
-      updateRateLimit(request, false, rateLimitConfigs.login);
-      
-      return NextResponse.json(
-        { 
-          success: false, 
-          message: 'Invalid email or password' 
-        },
-        { status: 401 }
-      );
-    }
-
-    // Successful login
-    await user.resetLoginAttempts();
-    user.lastLogin = new Date();
-    await user.save();
+    // Create response
+    const response = NextResponse.json({
+      message: 'Login successful',
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role
+      }
+    });
 
     // Update session
-    const sessionUser = userToSessionUser(user);
-    await updateSession(request, response, {
-      user: sessionUser,
-      isLoggedIn: true,
-      loginAttempts: 0
-    });
+    const session = await getIronSession<SessionData>(request, response, sessionOptions);
+    session.isLoggedIn = true;
+    session.user = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role as 'user' | 'admin',
+      authMethod: user.authMethod as 'local' | 'ldap' | 'oauth'
+    };
+    await session.save();
 
-    updateRateLimit(request, true, rateLimitConfigs.login);
-
-    return NextResponse.json({
-      success: true,
-      message: 'Login successful',
-      user: sessionUser,
-      csrfToken: generateCSRFToken()
-    });
+    return response;
 
   } catch (error) {
     console.error('Login error:', error);
-    updateRateLimit(request, false, rateLimitConfigs.login);
-    
     return NextResponse.json(
-      { 
-        success: false, 
-        message: 'An error occurred during login. Please try again.' 
-      },
+      { message: 'Internal server error' },
       { status: 500 }
     );
   }

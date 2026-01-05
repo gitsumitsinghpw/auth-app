@@ -5,19 +5,7 @@ import { validateInput, registrationSchema } from '@/lib/validation';
 import { checkRegisterRateLimit, updateRateLimit, rateLimitConfigs } from '@/lib/rateLimit';
 import { generateCSRFToken } from '@/lib/auth';
 import bcrypt from 'bcryptjs';
-
-// Fallback in-memory storage for development when MongoDB is not available
-const fallbackUsers: Array<{
-  id: string;
-  name: string;
-  email: string;
-  password: string;
-  role: string;
-  authMethod: string;
-  isActive: boolean;
-  emailVerified: boolean;
-  createdAt: string;
-}> = [];
+import { fallbackStorage } from '@/lib/fallbackStorage';
 
 export async function POST(request: NextRequest) {
   try {
@@ -131,7 +119,7 @@ export async function POST(request: NextRequest) {
     
     if (!useDatabase) {
       // Fallback in-memory approach
-      const existingUser = fallbackUsers.find(user => user.email === email.toLowerCase());
+      const existingUser = fallbackStorage.findByEmail(email, 'local');
 
       if (existingUser) {
         updateRateLimit(request, false, rateLimitConfigs.register);
@@ -156,7 +144,7 @@ export async function POST(request: NextRequest) {
         createdAt: new Date().toISOString()
       };
 
-      fallbackUsers.push(newUser);
+      fallbackStorage.addUser(newUser);
 
       const csrfToken = generateCSRFToken();
       updateRateLimit(request, true, rateLimitConfigs.register);

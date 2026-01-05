@@ -33,10 +33,12 @@ export async function getSession(): Promise<SessionData> {
   }
 }
 
-// Get session for API routes
+// Get session for middleware (works with requests)
 export async function getSessionFromRequest(req: NextRequest): Promise<SessionData> {
   try {
-    const session = await getIronSession<SessionData>(req, NextResponse.next(), sessionOptions);
+    // Create a dummy response for session reading
+    const dummyResponse = new NextResponse();
+    const session = await getIronSession<SessionData>(req, dummyResponse, sessionOptions);
     
     if (!session.isLoggedIn) {
       return defaultSession;
@@ -44,7 +46,7 @@ export async function getSessionFromRequest(req: NextRequest): Promise<SessionDa
     
     return session;
   } catch (error) {
-    console.error('Session error:', error);
+    console.error('Middleware session error:', error);
     return defaultSession;
   }
 }
